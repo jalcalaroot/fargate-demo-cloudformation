@@ -1,0 +1,449 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: 'Creacion de Cluster ECS Farfate'
+# Debe de tener un NATGW o un VPC-Endpoints ECR creados en su VPC
+# Metadata
+Metadata:
+  # Se puede definir su propia agrupacion y ordenacion de parametros para que
+  # los usuarios puedan especificar de manera eficiente los valores de los parametros.
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Parametros de la VPC"
+        Parameters:
+          - VpcIdParameter
+      - Label:
+          default: 'Parametros del Loadbalancer'
+        Parameters:
+          # Parameter Lable LoadBalancer
+          - LoadbalancerSubnets
+          - LoadBalancerCertificateArn
+          - LoadbalancerSslPolicy
+          - LoadBalancerPort
+          - HealthCheckPath
+      - Label:
+          default: 'Parametros del Task'
+        Parameters:
+          - ServiceName
+          - Image
+          - ContainerPort
+          - ContainerSubnets
+      - Label:
+          default: 'Parametros del Servicio'
+        Parameters:
+          - Cpu
+          - Memory
+          - MinContainers
+          - MaxContainers
+          - AutoScalingTargetValue
+    ParameterLabels:
+      pTagValueApps:
+        default: workload:apps
+      pTagValueCostCenter:
+        default: workload:cost-center
+      # Parameter Lable VPC
+      VpcIdParameter:
+        default: 'Debe de seleccionar una VPC'
+      # Parameter Label Fargate
+      Image:
+        default: 'Ingrese imagen de Docker a utilizar'
+      ServiceName:
+        default: 'Ingrese el nombre del servicio'
+      ContainerPort:
+        default: 'Ingrese numero de puerto del Container'
+      ContainerSubnets:
+        default: 'Debe de seleccionar Subnets Privadas para uso de los Containers'
+      # Parameter Lable LoadBalancer
+      LoadbalancerSubnets:
+        default: 'Debe de seleccionar Subnets Publicas para uso del Application Loadbalancer'
+      LoadBalancerCertificateArn:
+        default: 'Ingrese el ARN del certificado generado por ACM'
+      LoadbalancerSslPolicy:
+        default: 'Seleccione la pol?tica de seguridad que define los protocolos y cifrados a utilizar con el ALB.'
+      LoadBalancerPort:
+        default: 'Ingrese numero de puerto a habilitar en el ALB'
+      HealthCheckPath:
+        default: 'Ingrese el Path de HealthChek'
+      # Parameter Lable AutoScaling
+      Cpu:
+        default: 'La cantidad minima de vCPU para reservar para el container.'
+      Memory:
+        default: 'La cantidad (en GB) de memoria utilizada para el task.'
+      MinContainers:
+        default: 'Ingres el numero minimo de Containers'
+      MaxContainers:
+        default: 'Ingres el numero max de Containers'
+      AutoScalingTargetValue:
+        default: 'Ingrese el numero para el AutoScaling Target Value'
+# Parameters
+Parameters:
+  pTagValueApps:
+    Type: String
+    Description: Este es el valor de tag para 'workload:apps'
+    Default: "ecs-cluster"
+  pTagValueCostCenter:
+    Type: Number
+    Description: Este es el valor de tag para 'workload:cost-center'.
+    Default: "179" 
+  # Parametros de la VPC
+  VpcIdParameter:
+    Type: 'AWS::EC2::VPC::Id'
+    Description: 'Escoger VPC'
+  ContainerSubnets:
+    Type: 'List<AWS::EC2::Subnet::Id>'
+    Description: 'Escoger Subnets a utilizar para los Containers'
+  LoadbalancerSubnets:
+    Type: 'List<AWS::EC2::Subnet::Id>'
+    Description: 'Escoger Subnets a utilizar para el Application Loadbalancer'
+  LoadBalancerCertificateArn:
+    Type: String
+    # Update with the certificate ARN from Certificate Manager, which must exist in the same region.
+    Default: 'arn:aws:acm:us-east-1:<AWS_ACCOUNT_ID>:certificate/36157dc4-2b34-4083-91ff-2f5fb4008e11'
+  Image:
+    Type: String
+    # Update with the Docker image. "You can use images in the Docker Hub registry or specify other repositories (repository-url/image:tag)."
+    Default: public.ecr.aws/nginx/nginx:1.27.1-alpine3.20-perl
+  ServiceName:
+    Type: String
+    # update with the name of the service
+    Default: MyService
+  ContainerPort:
+    Type: Number
+    Default: 80
+  LoadbalancerSslPolicy:
+    Type: String
+    Default: 'ELBSecurityPolicy-FS-1-2-Res-2019-08'
+    AllowedValues: ['ELBSecurityPolicy-TLS-1-2-2017-01', 'ELBSecurityPolicy-FS-1-2-2019-08', 'ELBSecurityPolicy-FS-1-2-Res-2019-08', 'ELBSecurityPolicy-FS-1-2-Res-2020-10',]
+  LoadBalancerPort:
+    Type: Number
+    Default: 443
+  HealthCheckPath:
+    Type: String
+    Default: /
+  Cpu:
+    Type: String
+    Default: '0.25'
+    AllowedValues: ['0.25', '0.5', '1', '2', '4']
+  Memory:
+    Type: String
+    Default: '0.5'
+    AllowedValues: ['0.5', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30']
+  # para autoscaling
+  MinContainers:
+    Type: Number
+    Default: 2
+    MinValue: 2
+    MaxValue: 10
+  # para autoscaling
+  MaxContainers:
+    Type: Number
+    Default: 6
+    MinValue: 2
+    MaxValue: 20
+  # target CPU utilization (%)
+  AutoScalingTargetValue:
+    Type: Number
+    Default: 75
+    MinValue: 1
+    MaxValue: 100
+# Mappings
+Mappings:
+  CpuMap:
+    '0.25':
+      Cpu: 256
+    '0.5':
+      Cpu: 512
+    '1':
+      Cpu: 1024
+    '2':
+      Cpu: 2048
+    '4':
+      Cpu: 4096
+  MemoryMap:
+    '0.5':
+      Memory: 512
+    '1':
+      Memory: 1024
+    '2':
+      Memory: 2048
+    '3':
+      Memory: 3072
+    '4':
+      Memory: 4096
+    '5':
+      Memory: 5120
+    '6':
+      Memory: 6144
+    '7':
+      Memory: 7168
+    '8':
+      Memory: 8192
+    '9':
+      Memory: 9216
+    '10':
+      Memory: 10240
+    '11':
+      Memory: 11264
+    '12':
+      Memory: 12288
+    '13':
+      Memory: 13312
+    '14':
+      Memory: 14336
+    '15':
+      Memory: 15360
+    '16':
+      Memory: 16384
+    '17':
+      Memory: 17408
+    '18':
+      Memory: 18432
+    '19':
+      Memory: 19456
+    '20':
+      Memory: 20480
+    '21':
+      Memory: 21504
+    '22':
+      Memory: 22528
+    '23':
+      Memory: 23552
+    '24':
+      Memory: 24576
+    '25':
+      Memory: 25600
+    '26':
+      Memory: 26624
+    '27':
+      Memory: 27648
+    '28':
+      Memory: 28672
+    '29':
+      Memory: 29696
+    '30':
+      Memory: 30720
+# Resources
+Resources:
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${ServiceName}-ecs-cluster'
+  TaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      # Name of the task definition. Subsequent versions of the task definition are grouped together under this name.
+      Family: !Sub '${ServiceName}-taskdefinition'
+      # awsvpc is required for Fargate
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      # 256 (.25 vCPU) - Available memory values: 0.5GB, 1GB, 2GB
+      # 512 (.5 vCPU) - Available memory values: 1GB, 2GB, 3GB, 4GB
+      # 1024 (1 vCPU) - Available memory values: 2GB, 3GB, 4GB, 5GB, 6GB, 7GB, 8GB
+      # 2048 (2 vCPU) - Available memory values: Between 4GB and 16GB in 1GB increments
+      # 4096 (4 vCPU) - Available memory values: Between 8GB and 30GB in 1GB increments
+      Cpu: !FindInMap [CpuMap, !Ref Cpu, Cpu]
+      # 0.5GB, 1GB, 2GB - Available cpu values: 256 (.25 vCPU)
+      # 1GB, 2GB, 3GB, 4GB - Available cpu values: 512 (.5 vCPU)
+      # 2GB, 3GB, 4GB, 5GB, 6GB, 7GB, 8GB - Available cpu values: 1024 (1 vCPU)
+      # Between 4GB and 16GB in 1GB increments - Available cpu values: 2048 (2 vCPU)
+      # Between 8GB and 30GB in 1GB increments - Available cpu values: 4096 (4 vCPU)
+      Memory: !FindInMap [MemoryMap, !Ref Memory, Memory]
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: !Ref ServiceName
+          Image: !Ref Image
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              Protocol: tcp
+          # Send logs to CloudWatch Logs
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: ecs
+  # role para ECS
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ServiceName}-execution-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - !Sub 'ecs-tasks.${AWS::URLSuffix}'
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+      Policies:
+        - PolicyName: !Sub ${ServiceName}-execution-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !GetAtt LogGroup.Arn
+  # role para los containers
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ServiceName}-task-role'
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub 'ecs-tasks.${AWS::URLSuffix}'
+            Action: 'sts:AssumeRole'
+  # role para auto scaling
+  AutoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ServiceName}-autoscaling-role'
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub 'ecs-tasks.${AWS::URLSuffix}'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceAutoscaleRole'
+  ContainerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${AWS::StackName}-container-sg"
+      GroupDescription: !Sub '${ServiceName}-container-securitygroup'
+      VpcId: !Ref VpcIdParameter
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ContainerPort
+          ToPort: !Ref ContainerPort
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-container-sg"
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${AWS::StackName}-alb-sg"
+      GroupDescription: !Sub '${ServiceName}-loadbalancer-securitygroup'
+      VpcId: !Ref VpcIdParameter
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref LoadBalancerPort
+          ToPort: !Ref LoadBalancerPort
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-alb-sg"
+  Service:
+    Type: 'AWS::ECS::Service'
+    DependsOn:
+      - ListenerHTTPS
+    Properties:
+      ServiceName: !Ref ServiceName
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      DesiredCount: 2
+      HealthCheckGracePeriodSeconds: 30
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          # Cambie a DISABLED si est? utilizando subredes privadas que tienen acceso por NAT GW
+          AssignPublicIp: DISABLED
+          Subnets: !Ref ContainerSubnets
+          SecurityGroups:
+            - !Ref ContainerSecurityGroup
+      LoadBalancers:
+        - ContainerName: !Ref ServiceName
+          ContainerPort: !Ref ContainerPort
+          TargetGroupArn: !Ref TargetGroup
+  TargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: !Ref HealthCheckPath
+      HealthCheckTimeoutSeconds: 5
+      UnhealthyThresholdCount: 2
+      HealthyThresholdCount: 2
+      Name: !Sub '${ServiceName}-tg'
+      Port: !Ref ContainerPort
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 60 # default es 300
+      TargetType: ip
+      VpcId: !Ref VpcIdParameter
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-tg"
+  ListenerHTTPS:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref TargetGroup
+          Type: forward
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: !Ref LoadBalancerPort
+      Protocol: HTTPS
+      SslPolicy: !Ref LoadbalancerSslPolicy
+      Certificates:
+        - CertificateArn: !Ref LoadBalancerCertificateArn
+  LoadBalancer:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Type: 'application'
+      Scheme: internet-facing
+      IpAddressType: 'ipv4'
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+      Subnets: !Ref LoadbalancerSubnets
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: 60
+      Name: !Sub '${ServiceName}-alb'
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-alb"
+  LogGroup:
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/ecs/${ServiceName}-taskdefinition'
+  AutoScalingTarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    Properties:
+      MinCapacity: !Ref MinContainers
+      MaxCapacity: !Ref MaxContainers
+      ResourceId: !Join ['/', [service, !Ref Cluster, !GetAtt Service.Name]]
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+      RoleARN: !GetAtt AutoScalingRole.Arn
+  AutoScalingPolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub '${ServiceName}-autoscaling-policy'
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref AutoScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        ScaleInCooldown: 10
+        ScaleOutCooldown: 10
+        TargetValue: !Ref AutoScalingTargetValue
