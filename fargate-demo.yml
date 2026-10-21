@@ -98,7 +98,7 @@ Parameters:
   LoadBalancerCertificateArn:
     Type: String
     # Update with the certificate ARN from Certificate Manager, which must exist in the same region.
-    Default: 'arn:aws:acm:us-east-1:<AWS_ACCOUNT_ID>:certificate/36157dc4-2b34-4083-91ff-2f5fb4008e11'
+    Default: 'arn:aws:acm:us-east-1:<AWS_ACCOUNT_ID>:certificate/<CERTIFICATE_ID>'
   Image:
     Type: String
     # Update with the Docker image. "You can use images in the Docker Hub registry or specify other repositories (repository-url/image:tag)."
